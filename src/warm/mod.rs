@@ -31,6 +31,25 @@ impl Environment {
 		Ok(())
 	}
 
+	pub fn prepare_output(&mut self) -> eyre::Result<()> {
+		self.dirs.sort_by(|a, b| {
+			a.outpath
+				.components()
+				.count()
+				.cmp(&b.outpath.components().count())
+		});
+
+		for dir in &self.dirs {
+			if dir.outpath == self.warm.outdir {
+				continue;
+			}
+
+			std::fs::create_dir(&dir.outpath)?;
+		}
+
+		Ok(())
+	}
+
 	pub fn print(&self) {
 		for dir in &self.dirs {
 			println!("{} -> {}", dir.inpath, dir.outpath);

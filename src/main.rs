@@ -24,6 +24,7 @@ fn main() -> eyre::Result<()> {
 				let mut env = warm::Environment::new(warm);
 				env.populate()?;
 				env.parse_files()?;
+				env.prepare_output()?;
 				env.print();
 			}
 		}
