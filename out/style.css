@@ -1,0 +1,40 @@
+* {
+	padding: 0;
+	margin: 0;
+}
+
+body {
+	width: 100vw;
+	margin: 4rem 0;
+}
+
+nav {
+	margin-bottom: 1rem;
+	padding-bottom: 1rem;
+	border-bottom: 1px solid black;
+}
+
+main,
+nav,
+#backlinks {
+	width: 40rem;
+	margin: 0 auto;
+}
+
+main {
+	margin-top: 1rem;
+	margin-bottom: 1rem;
+}
+
+main>p {
+	margin: 1rem 0;
+}
+
+#backlinks {
+	display: flex;
+	flex-direction: column;
+}
+
+#backlinks>h3 {
+	color: #444;
+}
