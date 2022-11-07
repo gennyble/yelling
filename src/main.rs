@@ -25,6 +25,7 @@ fn main() -> eyre::Result<()> {
 				env.populate()?;
 				env.parse_files()?;
 				env.prepare_output()?;
+				env.write_files()?;
 				env.print();
 			}
 		}

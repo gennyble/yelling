@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use eyre::bail;
 use quark::{Inline, Link, Parser};
-use std::{cell::RefCell, collections::HashMap, ops::Deref};
+use std::{cell::RefCell, collections::HashMap, io::Write};
 
 use crate::job::Warm;
 
@@ -45,6 +45,37 @@ impl Environment {
 			}
 
 			std::fs::create_dir(&dir.outpath)?;
+		}
+
+		Ok(())
+	}
+
+	pub fn write_files(&mut self) -> eyre::Result<()> {
+		for dir in self.dirs.iter_mut() {
+			for file in dir.files.iter_mut() {
+				let mut doc = self.warm.template.clone();
+				match file.content.take().unwrap() {
+					Content::Quark(_) => panic!(),
+					Content::IncompleteHtml(html) => {
+						println!("Running {}", file.inpath);
+						doc.set(&self.warm.content_key, html);
+
+						let mut backlinks = file.backlinks.borrow_mut();
+						backlinks.dedup();
+
+						for bl in backlinks.iter() {
+							let mut pat = doc.get_pattern(&self.warm.backlink_pattern).unwrap();
+							pat.set(&self.warm.backlink_key, &bl);
+							pat.set(&self.warm.backlink_name_key, bl.file_stem().unwrap());
+							doc.set_pattern(&self.warm.backlink_pattern, pat);
+						}
+					}
+				}
+
+				let mut htmlfile = std::fs::File::create(&file.outpath)?;
+				let html = doc.compile();
+				htmlfile.write_all(html.as_bytes())?
+			}
 		}
 
 		Ok(())
