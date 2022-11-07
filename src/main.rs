@@ -23,6 +23,7 @@ fn main() -> eyre::Result<()> {
 			Job::Warm(warm) => {
 				let mut env = warm::Environment::new(warm);
 				env.populate()?;
+				env.parse_files()?;
 				env.print();
 			}
 		}
