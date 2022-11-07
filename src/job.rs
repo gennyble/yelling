@@ -1,9 +1,26 @@
 use bempline::{Document, Options};
 use camino::Utf8PathBuf;
 use confindent::Value;
+use eyre::bail;
+
+pub enum Job {
+	Warm(Warm),
+}
+
+impl Job {
+	pub fn new(conf: &Value) -> eyre::Result<Job> {
+		let kind = conf.child_value("Type");
+
+		match kind.map(|s| s.to_lowercase()).as_deref() {
+			None => bail!("No job type"),
+			Some("warm") => Ok(Job::Warm(Warm::new(conf)?)),
+			Some(kind) => bail!("Job type {kind} not understood"),
+		}
+	}
+}
 
 #[derive(Clone, Debug)]
-pub struct Job {
+pub struct Warm {
 	pub name: String,
 	pub indir: Utf8PathBuf,
 	pub outdir: Utf8PathBuf,
@@ -14,8 +31,8 @@ pub struct Job {
 	pub backlink_name_key: String,
 }
 
-impl Job {
-	pub fn new(conf: &Value) -> eyre::Result<Job> {
+impl Warm {
+	pub fn new(conf: &Value) -> eyre::Result<Warm> {
 		let name = conf.value_owned().unwrap();
 		let indir = conf.child_parse("In").unwrap();
 		let outdir = conf.child_parse("Out").unwrap();
