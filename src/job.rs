@@ -29,6 +29,9 @@ pub struct Warm {
 	pub backlink_pattern: String,
 	pub backlink_key: String,
 	pub backlink_name_key: String,
+	pub friend_pattern: String,
+	pub friend_key: String,
+	pub friend_name_key: String,
 }
 
 impl Warm {
@@ -43,6 +46,9 @@ impl Warm {
 		let backlink_pattern = ts.child_owned("BacklinkPattern").unwrap();
 		let backlink_key = ts.child_owned("BacklinkKey").unwrap();
 		let backlink_name_key = ts.child_owned("BacklinkNameKey").unwrap();
+		let friend_pattern = ts.child_owned("FriendPattern").unwrap();
+		let friend_key = ts.child_owned("FriendKey").unwrap();
+		let friend_name_key = ts.child_owned("FriendNameKey").unwrap();
 
 		Ok(Self {
 			name,
@@ -53,6 +59,9 @@ impl Warm {
 			backlink_pattern,
 			backlink_key,
 			backlink_name_key,
+			friend_pattern,
+			friend_key,
+			friend_name_key,
 		})
 	}
 }

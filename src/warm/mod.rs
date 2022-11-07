@@ -44,7 +44,7 @@ impl Environment {
 				continue;
 			}
 
-			std::fs::create_dir(&dir.outpath)?;
+			std::fs::create_dir_all(&dir.outpath)?;
 		}
 
 		Ok(())
@@ -52,6 +52,17 @@ impl Environment {
 
 	pub fn write_files(&mut self) -> eyre::Result<()> {
 		for dir in self.dirs.iter_mut() {
+			let friends = dir
+				.files
+				.iter()
+				.map(|file| {
+					file.outpath
+						.strip_prefix(&self.warm.outdir)
+						.unwrap()
+						.to_path_buf()
+				})
+				.collect::<Vec<Utf8PathBuf>>();
+
 			for file in dir.files.iter_mut() {
 				let mut doc = self.warm.template.clone();
 				match file.content.take().unwrap() {
@@ -68,6 +79,24 @@ impl Environment {
 							pat.set(&self.warm.backlink_key, &bl);
 							pat.set(&self.warm.backlink_name_key, bl.file_stem().unwrap());
 							doc.set_pattern(&self.warm.backlink_pattern, pat);
+						}
+
+						let relpath = file.outpath.strip_prefix(&self.warm.outdir)?;
+						for fr in friends.iter() {
+							if fr == relpath {
+								continue;
+							}
+
+							let mut name = fr.clone();
+							name.set_extension("");
+
+							let mut pat = doc.get_pattern(&self.warm.friend_pattern).unwrap();
+							pat.set(&self.warm.friend_key, relativise_path(relpath, fr)?);
+							pat.set(
+								&self.warm.friend_name_key,
+								name.components().last().unwrap(),
+							);
+							doc.set_pattern(&self.warm.friend_pattern, pat);
 						}
 					}
 				}

@@ -7,6 +7,14 @@
 <body>
 	<nav>
 		<a id="home" href="/">nyble.dev</a>
+		<section id="friends">
+			<h3>page friends</h3>
+			<ul>
+				{%pattern friend}
+				<a href="{friend}">{friend_name}</a>
+				{%end}
+			</ul>
+		</section>
 	</nav>
 	<main>
 		{content}
