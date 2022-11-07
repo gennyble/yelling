@@ -1,9 +1,7 @@
 mod job;
 mod warm;
 
-use camino::Utf8PathBuf;
 use confindent::Confindent;
-use eyre::bail;
 
 use crate::job::Job;
 

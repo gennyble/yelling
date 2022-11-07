@@ -167,14 +167,7 @@ impl Environment {
 	}
 
 	fn html(&self, file: &File) -> eyre::Result<()> {
-		let File {
-			inpath,
-			outpath,
-			content,
-			backlinks,
-		} = file;
-
-		let parser = match content.take() {
+		let parser = match file.content.take() {
 			Some(Content::Quark(parser)) => parser,
 			_ => unreachable!(),
 		};
@@ -196,7 +189,7 @@ impl Environment {
 			}
 		}
 
-		content.replace(Some(Content::IncompleteHtml(ret)));
+		file.content.replace(Some(Content::IncompleteHtml(ret)));
 		Ok(())
 	}
 
@@ -309,19 +302,6 @@ pub struct File {
 pub enum Content {
 	Quark(Parser),
 	IncompleteHtml(String),
-}
-
-impl Content {
-	pub fn quark(parser: Parser) -> Self {
-		Self::Quark(parser)
-	}
-
-	pub fn is_quark(&self) -> bool {
-		match self {
-			Self::Quark(_) => true,
-			_ => false,
-		}
-	}
 }
 
 pub fn relativise_path<A: Into<Utf8PathBuf>, B: Into<Utf8PathBuf>>(
