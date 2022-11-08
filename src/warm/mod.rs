@@ -26,6 +26,10 @@ impl Environment {
 			for file in &dir.files {
 				self.html(file)?;
 			}
+
+			if let Some(file) = dir.dirfile.as_ref() {
+				self.html(&file)?;
+			}
 		}
 
 		Ok(())
@@ -52,60 +56,78 @@ impl Environment {
 
 	pub fn write_files(&mut self) -> eyre::Result<()> {
 		for dir in self.dirs.iter_mut() {
-			let friends = dir
-				.files
+			let mut friends: Vec<Utf8PathBuf> =
+				dir.files.iter().map(|f| f.outpath.clone()).collect();
+
+			if let Some(file) = dir.dirfile.as_ref() {
+				friends.push(file.outpath.clone());
+			}
+
+			friends = friends
 				.iter()
-				.map(|file| {
-					file.outpath
-						.strip_prefix(&self.warm.outdir)
-						.unwrap()
-						.to_path_buf()
-				})
+				.map(|path| path.strip_prefix(&self.warm.outdir).unwrap().to_path_buf())
 				.collect::<Vec<Utf8PathBuf>>();
 
 			for file in dir.files.iter_mut() {
-				let mut doc = self.warm.template.clone();
-				match file.content.take().unwrap() {
-					Content::Quark(_) => panic!(),
-					Content::IncompleteHtml(html) => {
-						println!("Running {}", file.inpath);
-						doc.set(&self.warm.content_key, html);
+				Self::write_file(&self.warm, &file, &friends)?;
+			}
 
-						let mut backlinks = file.backlinks.borrow_mut();
-						backlinks.dedup();
-
-						for bl in backlinks.iter() {
-							let mut pat = doc.get_pattern(&self.warm.backlink_pattern).unwrap();
-							pat.set(&self.warm.backlink_key, &bl);
-							pat.set(&self.warm.backlink_name_key, bl.file_stem().unwrap());
-							doc.set_pattern(&self.warm.backlink_pattern, pat);
-						}
-
-						let relpath = file.outpath.strip_prefix(&self.warm.outdir)?;
-						for fr in friends.iter() {
-							if fr == relpath {
-								continue;
-							}
-
-							let mut name = fr.clone();
-							name.set_extension("");
-
-							let mut pat = doc.get_pattern(&self.warm.friend_pattern).unwrap();
-							pat.set(&self.warm.friend_key, relativise_path(relpath, fr)?);
-							pat.set(
-								&self.warm.friend_name_key,
-								name.components().last().unwrap(),
-							);
-							doc.set_pattern(&self.warm.friend_pattern, pat);
-						}
-					}
-				}
-
-				let mut htmlfile = std::fs::File::create(&file.outpath)?;
-				let html = doc.compile();
-				htmlfile.write_all(html.as_bytes())?
+			if let Some(file) = dir.dirfile.as_ref() {
+				Self::write_file(&self.warm, &file, &friends)?;
 			}
 		}
+
+		Ok(())
+	}
+
+	fn write_file(warm: &Warm, file: &File, friends: &Vec<Utf8PathBuf>) -> eyre::Result<()> {
+		let mut doc = warm.template.clone();
+		match file.content.take().unwrap() {
+			Content::Quark(_) => panic!(),
+			Content::IncompleteHtml(html) => {
+				println!("Running {}", file.inpath);
+				doc.set(&warm.content_key, html);
+
+				let mut backlinks = file.backlinks.borrow_mut();
+				backlinks.dedup();
+
+				for bl in backlinks.iter() {
+					let linkname = if bl == "." {
+						file.outpath.file_stem().unwrap()
+					} else {
+						bl.file_stem().unwrap()
+					};
+
+					/*
+						We just did dirfile in directory and got self-interlinks working. We should fix proper the relativise fn sometime
+					*/
+
+					let mut pat = doc.get_pattern(&warm.backlink_pattern).unwrap();
+					pat.set(&warm.backlink_key, &bl);
+					pat.set(&warm.backlink_name_key, linkname);
+					doc.set_pattern(&warm.backlink_pattern, pat);
+				}
+
+				let relpath = file.outpath.strip_prefix(&warm.outdir)?;
+				for fr in friends.iter() {
+					if fr == relpath {
+						continue;
+					}
+
+					let mut name = fr.clone();
+					name.set_extension("");
+
+					let mut pat = doc.get_pattern(&warm.friend_pattern).unwrap();
+					pat.set(&warm.friend_key, relativise_path(relpath, fr)?);
+					pat.set(&warm.friend_name_key, name.components().last().unwrap());
+					doc.set_pattern(&warm.friend_pattern, pat);
+				}
+			}
+		}
+
+		let mut htmlfile = std::fs::File::create(&file.outpath)?;
+		let html = doc.compile();
+		htmlfile.write_all(html.as_bytes())?;
 
 		Ok(())
 	}
@@ -113,6 +135,10 @@ impl Environment {
 	pub fn print(&self) {
 		for dir in &self.dirs {
 			println!("{} -> {}", dir.inpath, dir.outpath);
+			if let Some(file) = dir.dirfile.as_ref() {
+				println!("\tDirfile: {} -> {}", file.inpath, file.outpath);
+			}
+
 			for file in &dir.files {
 				println!("\t{} -> {}", file.inpath, file.outpath);
 			}
@@ -130,6 +156,7 @@ impl Environment {
 			inpath: idir,
 			outpath: odir,
 			files: vec![],
+			dirfile: None,
 		};
 
 		for entry in dir.inpath.read_dir_utf8()? {
@@ -150,12 +177,21 @@ impl Environment {
 				let mut parser = Parser::new();
 				parser.parse(content);
 
-				dir.files.push(File {
+				let file = File {
 					inpath: ifile.to_path_buf(),
 					outpath: ofile,
 					content: RefCell::new(Some(Content::Quark(parser))),
 					backlinks: RefCell::new(vec![]),
-				});
+				};
+
+				let dirname = dir.inpath.components().last().map(|c| c.as_str()).unwrap();
+				let filename = entry.path().file_stem();
+
+				match filename {
+					Some(name) if dirname == name => dir.dirfile = Some(file),
+					Some("index") => dir.dirfile = Some(file),
+					_ => dir.files.push(file),
+				}
 			} else if meta.is_dir() {
 				Self::gather_dir(entry.path(), dirs, warm)?
 			}
@@ -167,6 +203,7 @@ impl Environment {
 	}
 
 	fn html(&self, file: &File) -> eyre::Result<()> {
+		println!("in html for {}", file.outpath);
 		let parser = match file.content.take() {
 			Some(Content::Quark(parser)) => parser,
 			_ => unreachable!(),
@@ -209,10 +246,12 @@ impl Environment {
 					let Link { name, location } = interlink;
 					let location = location.trim();
 
+					println!("Before shortest path in inline");
 					let matching_files = self.find_shortest_path(location);
 					if matching_files.len() > 1 {
 						bail!("reflink {location} resolved to multiple files!")
 					}
+					println!("before match in inline");
 
 					match matching_files.first() {
 						None => {
@@ -224,14 +263,17 @@ impl Environment {
 							let interlinked_relpath =
 								interlinked_file.outpath.strip_prefix(&self.warm.outdir)?;
 
+							println!("before relativise");
 							let reflink_path =
 								relativise_path(&file_relpath, &interlinked_relpath)?;
 							let backlink_path =
 								relativise_path(&interlinked_relpath, &file_relpath)?;
 
+							println!("B4 bl {location}");
 							{
 								let mut bl = interlinked_file.backlinks.borrow_mut();
 								bl.push(backlink_path);
+								drop(bl);
 							}
 
 							let link_name = name.as_deref().unwrap_or(location);
@@ -274,10 +316,16 @@ impl Environment {
 		let mut files = vec![];
 
 		for dir in &self.dirs {
+			if let Some(ref file) = dir.dirfile {
+				if dir.inpath.ends_with(reflink) {
+					files.push(file);
+				}
+			}
+
 			for file in &dir.files {
 				let search = file.inpath.with_extension("");
 				if search.ends_with(reflink) {
-					files.push(file)
+					files.push(file);
 				}
 			}
 		}
@@ -290,6 +338,7 @@ pub struct Directory {
 	inpath: Utf8PathBuf,
 	outpath: Utf8PathBuf,
 	files: Vec<File>,
+	dirfile: Option<File>,
 }
 
 pub struct File {
@@ -313,6 +362,10 @@ pub fn relativise_path<A: Into<Utf8PathBuf>, B: Into<Utf8PathBuf>>(
 	/*let target = target
 	.canonicalize_utf8()
 	.wrap_err_with(|| format!("Failed to canonicalize target directory: {target}"))?;*/
+
+	if base == target {
+		return Ok(Utf8PathBuf::from("."));
+	}
 
 	if base.is_file() {
 		if !base.pop() {
