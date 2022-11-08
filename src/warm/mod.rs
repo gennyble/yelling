@@ -1,4 +1,4 @@
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf, Utf8PrefixComponent};
 use eyre::bail;
 use quark::{Inline, Link, Parser};
 use std::{cell::RefCell, collections::HashMap, io::Write};
@@ -37,38 +37,50 @@ impl Environment {
 
 	pub fn prepare_output(&mut self) -> eyre::Result<()> {
 		self.dirs.sort_by(|a, b| {
-			a.outpath
+			a.paths
+				.outpath
 				.components()
 				.count()
-				.cmp(&b.outpath.components().count())
+				.cmp(&b.paths.outpath.components().count())
 		});
 
 		for dir in &self.dirs {
-			if dir.outpath == self.warm.outdir {
+			if dir.paths.outpath == self.warm.outdir {
 				continue;
 			}
 
-			std::fs::create_dir_all(&dir.outpath)?;
+			std::fs::create_dir_all(&dir.paths.outpath)?;
 		}
 
 		Ok(())
 	}
 
 	pub fn write_files(&mut self) -> eyre::Result<()> {
-		for dir in self.dirs.iter_mut() {
+		for dir in self.dirs.iter() {
 			let mut friends: Vec<Utf8PathBuf> =
-				dir.files.iter().map(|f| f.outpath.clone()).collect();
+				dir.files.iter().map(|f| f.paths.outpath.clone()).collect();
 
 			if let Some(file) = dir.dirfile.as_ref() {
-				friends.push(file.outpath.clone());
+				friends.push(file.paths.outpath.clone());
 			}
+
+			friends.extend(self.dirs.iter().filter_map(|adir| {
+				if adir.dirfile.is_some()
+					&& adir.paths.inpath.parent().is_some()
+					&& adir.paths.inpath.parent().unwrap() == dir.paths.inpath
+				{
+					Some(adir.dirfile.as_ref().unwrap().paths.outpath.clone())
+				} else {
+					None
+				}
+			}));
 
 			friends = friends
 				.iter()
 				.map(|path| path.strip_prefix(&self.warm.outdir).unwrap().to_path_buf())
 				.collect::<Vec<Utf8PathBuf>>();
 
-			for file in dir.files.iter_mut() {
+			for file in dir.files.iter() {
 				Self::write_file(&self.warm, &file, &friends)?;
 			}
 
@@ -85,7 +97,7 @@ impl Environment {
 		match file.content.take().unwrap() {
 			Content::Quark(_) => panic!(),
 			Content::IncompleteHtml(html) => {
-				println!("Running {}", file.inpath);
+				println!("Running {}", file.paths.relpath);
 				doc.set(&warm.content_key, html);
 
 				let mut backlinks = file.backlinks.borrow_mut();
@@ -93,7 +105,7 @@ impl Environment {
 
 				for bl in backlinks.iter() {
 					let linkname = if bl == "." {
-						file.outpath.file_stem().unwrap()
+						file.paths.outpath.file_stem().unwrap()
 					} else {
 						bl.file_stem().unwrap()
 					};
@@ -108,7 +120,7 @@ impl Environment {
 					doc.set_pattern(&warm.backlink_pattern, pat);
 				}
 
-				let relpath = file.outpath.strip_prefix(&warm.outdir)?;
+				let relpath = file.paths.outpath.strip_prefix(&warm.outdir)?;
 				for fr in friends.iter() {
 					if fr == relpath {
 						continue;
@@ -125,7 +137,7 @@ impl Environment {
 			}
 		}
 
-		let mut htmlfile = std::fs::File::create(&file.outpath)?;
+		let mut htmlfile = std::fs::File::create(&file.paths.outpath)?;
 		let html = doc.compile();
 		htmlfile.write_all(html.as_bytes())?;
 
@@ -134,13 +146,13 @@ impl Environment {
 
 	pub fn print(&self) {
 		for dir in &self.dirs {
-			println!("{} -> {}", dir.inpath, dir.outpath);
+			println!("{} -> {}", dir.paths.inpath, dir.paths.outpath);
 			if let Some(file) = dir.dirfile.as_ref() {
-				println!("\tDirfile: {} -> {}", file.inpath, file.outpath);
+				println!("\tDirfile: {} -> {}", file.paths.inpath, file.paths.outpath);
 			}
 
 			for file in &dir.files {
-				println!("\t{} -> {}", file.inpath, file.outpath);
+				println!("\t{} -> {}", file.paths.inpath, file.paths.outpath);
 			}
 		}
 	}
@@ -150,16 +162,14 @@ impl Environment {
 		dirs: &mut Vec<Directory>,
 		warm: &Warm,
 	) -> eyre::Result<()> {
-		let idir = dir.into();
-		let odir = warm.outdir.join(idir.strip_prefix(&warm.indir)?);
+		let paths = PathStuff::new(dir, warm);
 		let mut dir = Directory {
-			inpath: idir,
-			outpath: odir,
+			paths,
 			files: vec![],
 			dirfile: None,
 		};
 
-		for entry in dir.inpath.read_dir_utf8()? {
+		for entry in dir.paths.inpath.read_dir_utf8()? {
 			let entry = entry?;
 			let meta = entry.metadata()?;
 
@@ -169,27 +179,27 @@ impl Environment {
 			}
 
 			if meta.is_file() {
-				let ifile = entry.path();
-				let mut ofile = dir.outpath.join(entry.file_name());
-				ofile.set_extension("html");
+				let mut paths = PathStuff::new(entry.path(), warm);
+				paths.set_extension("html");
 
-				let content = std::fs::read_to_string(ifile)?;
+				let content = std::fs::read_to_string(&paths.inpath)?;
 				let mut parser = Parser::new();
 				parser.parse(content);
 
 				let file = File {
-					inpath: ifile.to_path_buf(),
-					outpath: ofile,
+					paths,
 					content: RefCell::new(Some(Content::Quark(parser))),
 					backlinks: RefCell::new(vec![]),
 				};
 
-				let dirname = dir.inpath.components().last().map(|c| c.as_str()).unwrap();
-				let filename = entry.path().file_stem();
+				let dirname = dir.paths.name();
+				let filename = file.paths.stem();
 
-				match filename {
-					Some(name) if dirname == name => dir.dirfile = Some(file),
-					Some("index") => dir.dirfile = Some(file),
+				match (dirname, filename) {
+					(_, Some("index")) => dir.dirfile = Some(file),
+					(Some(dirname), Some(filename)) if dirname == filename => {
+						dir.dirfile = Some(file)
+					}
 					_ => dir.files.push(file),
 				}
 			} else if meta.is_dir() {
@@ -203,7 +213,7 @@ impl Environment {
 	}
 
 	fn html(&self, file: &File) -> eyre::Result<()> {
-		println!("in html for {}", file.outpath);
+		println!("in html for {}", file.paths.outpath);
 		let parser = match file.content.take() {
 			Some(Content::Quark(parser)) => parser,
 			_ => unreachable!(),
@@ -259,15 +269,15 @@ impl Environment {
 							ret.push_str(&format!("{{{interlink}}}"));
 						}
 						Some(interlinked_file) => {
-							let file_relpath = file.outpath.strip_prefix(&self.warm.outdir)?;
-							let interlinked_relpath =
-								interlinked_file.outpath.strip_prefix(&self.warm.outdir)?;
-
 							println!("before relativise");
-							let reflink_path =
-								relativise_path(&file_relpath, &interlinked_relpath)?;
-							let backlink_path =
-								relativise_path(&interlinked_relpath, &file_relpath)?;
+							let reflink_path = relativise_path(
+								&file.paths.relpath,
+								&interlinked_file.paths.relpath,
+							)?;
+							let backlink_path = relativise_path(
+								&interlinked_file.paths.relpath,
+								&file.paths.relpath,
+							)?;
 
 							println!("B4 bl {location}");
 							{
@@ -317,13 +327,13 @@ impl Environment {
 
 		for dir in &self.dirs {
 			if let Some(ref file) = dir.dirfile {
-				if dir.inpath.ends_with(reflink) {
+				if dir.paths.inpath.ends_with(reflink) {
 					files.push(file);
 				}
 			}
 
 			for file in &dir.files {
-				let search = file.inpath.with_extension("");
+				let search = file.paths.inpath.with_extension("");
 				if search.ends_with(reflink) {
 					files.push(file);
 				}
@@ -335,17 +345,55 @@ impl Environment {
 }
 
 pub struct Directory {
-	inpath: Utf8PathBuf,
-	outpath: Utf8PathBuf,
+	paths: PathStuff,
 	files: Vec<File>,
 	dirfile: Option<File>,
 }
 
 pub struct File {
-	inpath: Utf8PathBuf,
-	outpath: Utf8PathBuf,
+	paths: PathStuff,
 	content: RefCell<Option<Content>>,
 	backlinks: RefCell<Vec<Utf8PathBuf>>,
+}
+
+pub struct PathStuff {
+	inpath: Utf8PathBuf,
+	outpath: Utf8PathBuf,
+	// The common bit between the inpath and outpath
+	relpath: Utf8PathBuf,
+}
+
+impl PathStuff {
+	pub fn new<P: Into<Utf8PathBuf>>(path: P, warm: &Warm) -> Self {
+		let inpath = path.into();
+		let relpath = if inpath == warm.indir {
+			Utf8PathBuf::from("/")
+		} else {
+			inpath.strip_prefix(&warm.indir).unwrap().to_path_buf()
+		};
+
+		let outpath = warm.outdir.join(&relpath);
+
+		Self {
+			inpath,
+			outpath,
+			relpath,
+		}
+	}
+
+	pub fn set_extension<S: AsRef<str>>(&mut self, ext: S) {
+		let ext = ext.as_ref();
+		self.outpath.set_extension(ext);
+		self.relpath.set_extension(ext);
+	}
+
+	pub fn name(&self) -> Option<&str> {
+		self.relpath.file_name()
+	}
+
+	pub fn stem(&self) -> Option<&str> {
+		self.relpath.file_stem()
+	}
 }
 
 pub enum Content {
