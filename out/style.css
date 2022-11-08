@@ -1,6 +1,7 @@
 * {
 	padding: 0;
 	margin: 0;
+	box-sizing: border-box;
 }
 
 /* Media queries yanked from main stylesheet */
@@ -33,6 +34,26 @@
 	}
 }
 
+@media (max-width: 50rem) {
+
+	main,
+	nav,
+	#backlinks {
+		width: 100%;
+		padding: 0 1rem;
+	}
+}
+
+@media (min-width: 50rem) {
+
+	main,
+	nav,
+	#backlinks {
+		width: 40rem;
+		margin: 0 auto;
+	}
+}
+
 a {
 	text-decoration: none;
 	color: inherit;
@@ -58,13 +79,6 @@ nav {
 
 #friends {
 	margin-top: 1rem;
-}
-
-main,
-nav,
-#backlinks {
-	width: 40rem;
-	margin: 0 auto;
 }
 
 main {
@@ -93,5 +107,10 @@ main>p {
 	list-style: none;
 	display: flex;
 	flex-direction: row;
-	gap: 1rem;
+	flex-wrap: wrap;
+	gap: 0.25rem 1rem;
+}
+
+li {
+	white-space: nowrap;
 }

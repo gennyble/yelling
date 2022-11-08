@@ -1,7 +1,7 @@
 use camino::{Utf8Path, Utf8PathBuf, Utf8PrefixComponent};
 use eyre::bail;
 use quark::{Inline, Link, Parser};
-use std::{cell::RefCell, collections::HashMap, io::Write};
+use std::{cell::RefCell, collections::HashMap, io::Write, rc::Rc};
 
 use crate::job::Warm;
 
